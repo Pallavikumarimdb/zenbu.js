@@ -12,7 +12,7 @@
     "db:generate": "zen db generate"
   },
   "dependencies": {
-    "@zenbujs/core": "0.0.23",
+    "@zenbujs/core": "0.0.24",
     "@tailwindcss/vite": "^4.2.0",
     "@vitejs/plugin-react": "^5.0.0",
     "react": "^19.0.0",

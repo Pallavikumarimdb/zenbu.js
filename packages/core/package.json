@@ -1,6 +1,6 @@
 {
   "name": "@zenbujs/core",
-  "version": "0.0.23",
+  "version": "0.0.24",
   "type": "module",
   "publishConfig": {
     "access": "public"
@@ -117,7 +117,7 @@
     "isomorphic-git": "^1.37.6",
     "nanoid": "^5.1.6",
     "semver": "^7.8.0",
-    "tsx": "^4.21.0",
+    "tsx": "4.19.4",
     "vite": "^6.0.0",
     "ws": "^8.18.0"
   },
