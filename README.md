@@ -4,8 +4,8 @@
 
 <div align="center">
 
-[![CI](https://img.shields.io/github/actions/workflow/status/zenbu-labs/zenbu/ci.yml?branch=main&label=CI)](https://github.com/zenbu-labs/zenbu/actions)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/zenbu-labs/zenbu/blob/main/LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/zenbu-labs/zenbu.js/ci.yml?branch=main&label=CI)](https://github.com/zenbu-labs/zenbu.js/actions)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/zenbu-labs/zenbu.js/blob/main/LICENSE)
 [![npm version](https://img.shields.io/npm/v/@zenbujs/core.svg?label=npm%20package)](https://www.npmjs.com/package/@zenbujs/core)
 ![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)
 
@@ -23,6 +23,8 @@
 
 <p align="center">
   <a href="https://zenbulabs.mintlify.app" style="text-decoration: none;">Documentation</a>
+  &nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="https://deepwiki.com/zenbu-labs/zenbu.js" style="text-decoration: none;">DeepWiki</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="https://discord.gg/t3jzHHfc6z" style="text-decoration: none;">Discord</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
@@ -75,7 +77,7 @@ Plugins hot reload just like application code, because application code is itsel
 
 | Runtime        | Status       |
 | -------------- | ------------ |
-| Electron       | ✅ Supported |
+| Electron       | 🧪 Alpha     |
 | Node.js        | 🚧 WIP       |
 | Tauri          | 🚧 WIP       |
 | Browser-native | 🚧 WIP       |
@@ -119,3 +121,9 @@ For now, yes. But support for other runtimes like Tauri and pure Node.js is comi
 No - Zenbu.js is still in alpha, so it may still contain bugs and have large API changes
 
 </details>
+
+<br />
+
+<p align="center">
+  <a href="https://zenbulabs.mintlify.app" style="text-decoration: none;">Read the docs&nbsp;→</a>
+</p>
