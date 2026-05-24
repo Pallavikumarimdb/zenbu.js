@@ -5,6 +5,12 @@ import { createClient, type ClientProxy } from "./client/client";
 import type { SchemaShape } from "./db/schema";
 
 const UINT8_TAG = "__$u8";
+// Pre-built substrings we scan for to decide whether `dbParse` needs the
+// slow reviver path. `dbStringify` uses default `JSON.stringify` (no
+// whitespace), so Buffer-shaped objects always serialize to this exact
+// byte sequence; the Uint8Array tag contains no JSON-escapable chars, so
+// it also appears in the text literally whenever it's present.
+const BUFFER_MARKER = '"type":"Buffer"';
 
 export function dbStringify(value: unknown): string {
   return JSON.stringify(value, (_key, val) => {
@@ -18,6 +24,15 @@ export function dbStringify(value: unknown): string {
 }
 
 export function dbParse(text: string): any {
+  // Fast path: if neither binary-encoding marker is present in the raw
+  // JSON, the reviver below would walk every key but never transform
+  // anything. `JSON.parse` with a reviver is 2–5× slower than without
+  // because V8 has to call back into JS for every value — skipping it
+  // for the common all-JSON message shaves significant time off every
+  // inbound event on the renderer.
+  if (!text.includes(UINT8_TAG) && !text.includes(BUFFER_MARKER)) {
+    return JSON.parse(text);
+  }
   return JSON.parse(text, (_key, val) => {
     if (val !== null && typeof val === "object") {
       if (UINT8_TAG in val) {

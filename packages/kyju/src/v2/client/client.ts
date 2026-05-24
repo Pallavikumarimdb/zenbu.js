@@ -622,15 +622,20 @@ function createClientCore<TShape extends SchemaShape>(
       "kyju:client.update",
       Effect.gen(function* () {
         const root = getRoot();
-        const { proxy, getOperations } = createRecordingProxy(root);
+        const { proxy, getOperations, materialize, isOwnedProxy } =
+          createRecordingProxy(root);
         const result = fn(proxy);
 
         if (result !== undefined) {
           // Returning a value from the updater replaces the whole root,
-          // which is already a single op.
+          // which is already a single op. If the user returned our proxy
+          // (or any node from it), materialize it into a plain JSON copy
+          // before sending — the proxy isn't structured-cloneable and
+          // would otherwise serialize as its empty live target.
+          const value = isOwnedProxy(result) ? materialize(result) : result;
           yield* send({
             kind: "write",
-            op: { type: "root.set", path: [], value: result },
+            op: { type: "root.set", path: [], value: value as any },
           });
           return;
         }
