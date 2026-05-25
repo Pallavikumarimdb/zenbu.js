@@ -102,10 +102,12 @@ export class RendererHostService extends Service.create({
     // no plugin ever registers explicitly. User-defined view types live
     // alongside it; the name makes the framework-vs-user distinction
     // legible at every call site.
-    this.ctx.viewRegistry.registerAlias({
+    await this.ctx.viewRegistry.registerView({
       type: "entrypoint",
-      reloaderId: APP_RENDERER_RELOADER_ID,
-      pathPrefix: "",
+      source: {
+        pathPrefix: "",
+        sharedWith: APP_RENDERER_RELOADER_ID,
+      },
       meta: { kind: "entrypoint", label: "App" },
     });
 

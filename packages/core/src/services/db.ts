@@ -32,7 +32,7 @@ const log = createLogger("db");
  */
 async function findCorePackageRoot(): Promise<string> {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  let dir = path.resolve(here, "..", "..");
+  let dir = here;
   while (dir !== path.dirname(dir)) {
     const pkg = path.join(dir, "package.json");
     try {
@@ -43,7 +43,9 @@ async function findCorePackageRoot(): Promise<string> {
     }
     dir = path.dirname(dir);
   }
-  return path.resolve(here, "..", "..");
+  throw new Error(
+    `[buildCoreSection] could not locate @zenbujs/core package root by walking up from ${here}`,
+  );
 }
 
 /**

@@ -50,85 +50,47 @@ interface ViewEntry {
   registrationKey?: { kind: "componentView"; type: string };
 }
 
-/**
- * Source spec for a component view. The framework imports `modulePath`
- * in every iframe's prelude and calls
- * `registerViewComponent(type, <export>)` automatically, so `<View
- * type="...">` resolves to a real component without any user-land
- * sentinel.
- *
- * `modulePath` follows the same plugin-root resolution rules as advice
- * / content-script paths (relative is resolved against the registering
- * service's plugin root; absolute is taken verbatim).
- *
- * `exportName` defaults to `"default"`.
- */
-export interface RegisterViewSpecSource {
-  modulePath: string;
-  exportName?: string;
-}
+
+const DEFAULT_SHARED_RELOADER_ID = "app";
+
+export type ViewSource =
+  | {
+      // component view
+      modulePath: string;
+      exportName?: string;
+    }
+  | {
+      // iframe with dedicated Vite server
+      root: string;
+      configFile?: string | false;
+      eager?: boolean;
+    }
+  | {
+      // iframe sharing an existing Vite server
+      pathPrefix: string;
+      sharedWith?: string;
+    };
 
 /**
- * Spec for a fresh view registration. The registry spins up a Vite dev
- * server rooted at `root` and exposes the resulting URL under `type`.
- *
- * - `type`: stable id used by `<View type="...">` in the renderer.
- * - `root`: absolute path of the view's `index.html` directory.
- * - `configFile`: explicit Vite config path, or `false` to skip auto-discovery.
- * - `meta`: optional renderer-facing metadata.
- * - `source`: for `rendering: "component"` views, the file to import
- *   into every iframe's prelude.
+ *   - `rendering: "component"`: `source` must be `{ modulePath, ... }`.
+ *   - `rendering: "iframe"` (default): `source` is either a `root`
+ *     spec (own dev server) or a `pathPrefix` spec (share).
  */
-export interface RegisterViewSpec {
-  type: string;
-  /**
-   * Absolute path to the view's `index.html` directory. Required for
-   * `rendering: "iframe"` (the default). Ignored for
-   * `rendering: "component"` views.
-   */
-  root?: string;
-  configFile?: string | false;
-  meta?: ViewMeta;
-  /**
-   * Choose how the renderer mounts this view. See {@link ViewRendering}.
-   * Defaults to `"iframe"`.
-   */
-  rendering?: ViewRendering;
-  /**
-   * For `rendering: "component"` views, the source module whose export
-   * is the component to render. The framework imports it into every
-   * iframe's prelude and calls `registerViewComponent(type, ...)`
-   * automatically. Omit if you'd rather push the component from
-   * user-land via `useRegisterViewComponent` / `registerViewComponent`.
-   */
-  source?: RegisterViewSpecSource;
-  /**
-   * Force the Vite server to start immediately at registration time
-   * instead of on first iframe mount. The default is lazy: every plugin
-   * view's Vite server is created on-demand when the renderer's `<View>`
-   * component asks for its URL. Starting a second Vite server during the
-   * entrypoint's `loadURL` blocks the Node event loop for hundreds of ms
-   * and stalls the main iframe's modules, so eager registration is
-   * essentially never what you want for non-entrypoint views.
-   *
-   * Ignored for `rendering: "component"` views — they have no Vite
-   * server to start.
-   */
-  eager?: boolean;
-}
-
-/**
- * Spec for re-exposing an existing reloader under a different view type
- * with a path prefix. Mostly used by core to alias the host renderer
- * (`"app"`) and by plugins that bundle multiple sub-views inside one
- * Vite server.
- */
-export interface RegisterAliasSpec {
-  type: string;
-  reloaderId: string;
-  pathPrefix: string;
-  meta?: ViewMeta;
-}
+export type RegisterViewSpec =
+  | {
+      type: string;
+      meta?: ViewMeta;
+      rendering: "component";
+      source: { modulePath: string; exportName?: string };
+    }
+  | {
+      type: string;
+      meta?: ViewMeta;
+      rendering?: "iframe";
+      source:
+        | { root: string; configFile?: string | false; eager?: boolean }
+        | { pathPrefix: string; sharedWith?: string };
+    };
 
 export class ViewRegistryService extends Service.create({
   key: "viewRegistry",
@@ -137,55 +99,68 @@ export class ViewRegistryService extends Service.create({
   private views = new Map<string, ViewEntry>();
   private manifestIcons = new Map<string, string>();
 
-  async register(spec: RegisterViewSpec): Promise<ViewEntry> {
-    const { type, root, configFile, meta, eager } = spec;
-    const rendering: ViewRendering = spec.rendering ?? "iframe";
-    log.verbose(
-      `register("${type}", rendering="${rendering}", root="${root ?? ""}", config="${configFile}", eager=${!!eager})`,
-    );
+  async registerView(spec: RegisterViewSpec): Promise<ViewEntry> {
+    const { type, meta } = spec;
     const existing = this.views.get(type);
     if (existing) return existing;
 
-    // Component views skip Vite entirely — the host renderer mounts a
-    // React component registered under `type` directly. We still want
-    // them in the registry so chrome (sidebar slot, icon picker,
-    // label, focus chain, etc.) treats them identically to iframe views.
-    if (rendering === "component") {
-      // Two writes for a component view: this service keeps the
-      // metadata (label, icon, sidebar slot, rendering kind) in
-      // `lastKnownViewRegistry`, and the source—if any—goes into
-      // `core.registrations` for the renderer-side reconciler to
-      // dynamic-import and apply. `<View>` reads both.
-      //
-      // `modulePath` must be absolute (same convention as `root` for
-      // iframe views): the plugin author writes
-      // `path.resolve(import.meta.dirname, ...)`.
+    // --- component view ---------------------------------------------
+    if (spec.rendering === "component") {
+      // Metadata lives here (in `lastKnownViewRegistry`); the source
+      // goes into `core.registrations` for the renderer-side reconciler
+      // to dynamic-import and apply via `registerViewComponent`. `<View>`
+      // reads both.
       const entry: ViewEntry = {
         type,
         url: "",
         port: 0,
         ownsServer: false,
         lazy: false,
-        rendering,
+        rendering: "component",
         meta,
-        registrationKey: spec.source ? { kind: "componentView", type } : undefined,
+        registrationKey: { kind: "componentView", type },
       };
       this.views.set(type, entry);
       await this.syncToDb();
-      if (spec.source) {
-        await this.writeComponentViewRegistration(type, spec.source);
-      }
+      await this.writeComponentViewRegistration(type, spec.source);
       log.verbose(
-        `"${type}" registered as component view${spec.source ? ` (source=${spec.source.modulePath})` : ""}`,
+        `"${type}" registered as component view (source=${spec.source.modulePath})`,
       );
       return entry;
     }
 
-    if (!root) {
-      throw new Error(
-        `ViewRegistryService.register("${type}"): "root" is required for iframe views`,
+    // --- iframe view, sharing an existing Vite server ---------------
+    if ("pathPrefix" in spec.source) {
+      const { pathPrefix } = spec.source;
+      const reloaderId =
+        spec.source.sharedWith ?? DEFAULT_SHARED_RELOADER_ID;
+      const reloaderEntry = this.ctx.reloader.get(reloaderId);
+      if (!reloaderEntry) {
+        throw new Error(
+          `ViewRegistryService.register("${type}"): reloader "${reloaderId}" not found (shared iframe view). ` +
+            `Make sure the service that owns the reloader has evaluated before this register call — ` +
+            `for the framework's host renderer that means depending on RendererHostService.`,
+        );
+      }
+      const entry: ViewEntry = {
+        type,
+        url: `${reloaderEntry.url}${pathPrefix}`,
+        port: reloaderEntry.port,
+        ownsServer: false,
+        lazy: false,
+        rendering: "iframe",
+        meta,
+      };
+      this.views.set(type, entry);
+      await this.syncToDb();
+      log.verbose(
+        `"${type}" registered as shared iframe view at ${entry.url} (sharedWith=${reloaderId}, prefix=${pathPrefix})`,
       );
+      return entry;
     }
+
+    // --- iframe view with its own dedicated Vite server -------------
+    const { root, configFile, eager } = spec.source;
 
     if (!eager) {
       // Default path: declare the spec, defer the Vite startup until the
@@ -197,7 +172,7 @@ export class ViewRegistryService extends Service.create({
         port: 0,
         ownsServer: true,
         lazy: true,
-        rendering,
+        rendering: "iframe",
         meta,
       };
       this.views.set(type, entry);
@@ -205,14 +180,18 @@ export class ViewRegistryService extends Service.create({
       return entry;
     }
 
-    const reloaderEntry = await this.ctx.reloader.create(type, root, configFile);
+    const reloaderEntry = await this.ctx.reloader.create(
+      type,
+      root,
+      configFile,
+    );
     const entry: ViewEntry = {
       type,
       url: reloaderEntry.url,
       port: reloaderEntry.port,
       ownsServer: true,
       lazy: false,
-      rendering,
+      rendering: "iframe",
       meta,
     };
     this.views.set(type, entry);
@@ -243,32 +222,7 @@ export class ViewRegistryService extends Service.create({
     return entry;
   }
 
-  registerAlias(spec: RegisterAliasSpec): ViewEntry {
-    const { type, reloaderId, pathPrefix, meta } = spec;
-    const existing = this.views.get(type);
-    if (existing) return existing;
-
-    const reloaderEntry = this.ctx.reloader.get(reloaderId);
-    if (!reloaderEntry)
-      throw new Error(
-        `Reloader "${reloaderId}" not found for alias "${type}"`,
-      );
-
-    const entry: ViewEntry = {
-      type,
-      url: `${reloaderEntry.url}${pathPrefix}`,
-      port: reloaderEntry.port,
-      ownsServer: false,
-      lazy: false,
-      rendering: "iframe",
-      meta,
-    };
-    this.views.set(type, entry);
-    void this.syncToDb();
-    return entry;
-  }
-
-  async unregister(type: string): Promise<void> {
+  async unregisterView(type: string): Promise<void> {
     const entry = this.views.get(type);
     if (!entry) return;
     if (entry.ownsServer) {
@@ -298,6 +252,8 @@ export class ViewRegistryService extends Service.create({
     type: string,
     source: { modulePath: string; exportName?: string },
   ): Promise<void> {
+    void DEFAULT_SHARED_RELOADER_ID; // keep the constant referenced in this scope
+
     await enqueueRegistrationsWrite((root) => {
       const idx = root.core.registrations.findIndex(
         (r: any) => r.kind === "componentView" && r.type === type,
