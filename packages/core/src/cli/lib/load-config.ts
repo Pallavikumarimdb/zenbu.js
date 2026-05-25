@@ -198,7 +198,7 @@ export async function loadConfig(
       : "./.zenbu/db"
   if (typeof config.uiEntrypoint !== "string" || config.uiEntrypoint.length === 0) {
     throw new Error(
-      `${configPath}: missing required \`uiEntrypoint\` field (directory holding index.html + splash.html).`,
+      `${configPath}: missing required \`uiEntrypoint\` field (directory holding index.html).`,
     )
   }
   if (!Array.isArray(config.plugins)) {
@@ -220,13 +220,8 @@ export async function loadConfig(
       `${configPath}: uiEntrypoint must point at a directory; got ${config.uiEntrypoint}.`,
     )
   }
-  const splashPath = path.join(uiEntrypointPath, "splash.html")
-  if (!fs.existsSync(splashPath)) {
-    throw new Error(
-      `${configPath}: uiEntrypoint directory ${config.uiEntrypoint} is missing required \`splash.html\`. ` +
-        `The splash file is shown raw (no Vite) during the brief window between Electron startup and the app's first paint.`,
-    )
-  }
+  const splashCandidate = path.join(uiEntrypointPath, "splash.html")
+  const splashPath = fs.existsSync(splashCandidate) ? splashCandidate : undefined
   // Optional: `installing.html` next to splash. When present, the
   // production launcher loads it during clone + first install. Not
   // required — apps without it just see the dock icon during install.

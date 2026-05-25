@@ -1066,11 +1066,11 @@ export function getPlugin(name: string): PluginRecord | undefined {
  */
 export function registerAppEntrypoint(
   rendererDir: string,
-  splashPath: string,
+  splashPath?: string | null,
 ): void {
   const reg = getPluginRegistry();
   reg.appEntrypoint = rendererDir;
-  reg.splashPath = splashPath;
+  reg.splashPath = splashPath ?? null;
   notifySubscribers(reg);
 }
 

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
+import { stripTypeScriptTypes } from "node:module";
 
 type LoaderContext = {
   hot?: {
@@ -33,6 +34,7 @@ type InitializeData = {
 };
 
 const verbose = process.env.ZENBU_VERBOSE === "1";
+const nativeTsLoader = process.env.ZENBU_NATIVE_TS_LOADER !== "0";
 
 const loaderName = "zenbu-loader";
 let tracePort: TracePort | null = null;
@@ -52,6 +54,7 @@ let resolvedPluginSourceFiles: string[] = [];
  * `resolvedPayload` whenever the loader picks up a new config snapshot.
  */
 let serviceFileSet: Set<string> = new Set();
+let pluginDirSet: Set<string> = new Set();
 /**
  * Number of times we've materialized the plugin root since boot.
  */
@@ -62,6 +65,7 @@ export function initialize(data?: InitializeData): void {
     resolvedPayload = data.payload;
     resolvedPluginSourceFiles = data.pluginSourceFiles ?? [];
     serviceFileSet = collectServiceFiles(data.payload);
+    pluginDirSet = new Set(data.payload.plugins.map((p) => p.dir));
   }
   if (data?.tracePort) {
     tracePort = data.tracePort;
@@ -211,6 +215,30 @@ function collectServiceFiles(payload: RegistryPayload): Set<string> {
   return set;
 }
 
+function isInsidePluginDir(filePath: string): boolean {
+  const normalized = path.resolve(filePath);
+  for (const dir of pluginDirSet) {
+    const root = path.resolve(dir);
+    if (normalized === root || normalized.startsWith(root + path.sep)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function loadNativeStrippedTs(filePath: string): LoaderResult {
+  const source = fs.readFileSync(filePath, "utf8");
+  const code = stripTypeScriptTypes(source, {
+    mode: "transform",
+    sourceMap: false,
+  } as any);
+  return {
+    format: "module",
+    source: code,
+    shortCircuit: true,
+  };
+}
+
 // =============================================================================
 //                         config-driven barrel generation
 // =============================================================================
@@ -229,7 +257,7 @@ interface ResolvedPluginRecord {
 interface RegistryPayload {
   plugins: ResolvedPluginRecord[];
   appEntrypoint: string;
-  splashPath: string;
+  splashPath?: string;
 }
 
 /**
@@ -306,6 +334,7 @@ function getResolvedConfig(configPath: string): {
   resolvedPayload = fresh.payload;
   resolvedPluginSourceFiles = fresh.pluginSourceFiles;
   serviceFileSet = collectServiceFiles(fresh.payload);
+  pluginDirSet = new Set(fresh.payload.plugins.map((p) => p.dir));
   return fresh;
 }
 
@@ -567,9 +596,10 @@ function loadImpl(
     } catch {
       filePath = "";
     }
-    if (filePath && serviceFileSet.has(filePath)) {
+    if (filePath) {
+      const isServiceFile = serviceFileSet.has(filePath);
       // Deleted service file: dynohot may try to reload its previous URL before the barrel re-eval drops it. Short-circuit with an empty module so the read doesn't ENOENT.
-      if (!fs.existsSync(filePath)) {
+      if (isServiceFile && !fs.existsSync(filePath)) {
         serviceFileSet.delete(filePath);
         return {
           format: "module",
@@ -577,16 +607,33 @@ function loadImpl(
           shortCircuit: true,
         } satisfies LoaderResult;
       }
-      const downstream = nextLoad(url, context);
+
+      // Fast path: most main-process app/plugin files are plain `.ts` with no
+      // JSX and no tsconfig path aliases. Node 22's native TS stripper is much
+      // cheaper than the full tsx loader. Set ZENBU_NATIVE_TS_LOADER=0 to
+      // disable this path while debugging loader/source-map issues.
       if (
-        downstream &&
-        typeof (downstream as PromiseLike<unknown>).then === "function"
+        nativeTsLoader &&
+        filePath.endsWith(".ts") &&
+        isInsidePluginDir(filePath) &&
+        fs.existsSync(filePath)
       ) {
-        return Promise.resolve(downstream).then((r) =>
-          appendAutoRegister(r, filePath),
-        );
+        const stripped = loadNativeStrippedTs(filePath);
+        return isServiceFile ? appendAutoRegister(stripped, filePath) : stripped;
       }
-      return appendAutoRegister(downstream, filePath);
+
+      if (isServiceFile) {
+        const downstream = nextLoad(url, context);
+        if (
+          downstream &&
+          typeof (downstream as PromiseLike<unknown>).then === "function"
+        ) {
+          return Promise.resolve(downstream).then((r) =>
+            appendAutoRegister(r, filePath),
+          );
+        }
+        return appendAutoRegister(downstream, filePath);
+      }
     }
   }
 

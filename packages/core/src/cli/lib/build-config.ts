@@ -298,11 +298,11 @@ export interface ResolvedConfig {
    */
   uiEntrypointPath: string;
   /**
-   * Absolute path to `splash.html` inside the entrypoint directory. Loaded
-   * raw (no Vite) into a transient BrowserView during the brief window
-   * between Electron `whenReady` and the renderer's first paint.
+   * Absolute path to optional `splash.html` inside the entrypoint directory.
+   * When absent, Zenbu skips the transient splash view and waits for the
+   * real entrypoint renderer to paint.
    */
-  splashPath: string;
+  splashPath?: string;
   /**
    * Absolute path to `installing.html` inside the entrypoint directory, if
    * the user provided one. Optional. Production launcher loads this raw

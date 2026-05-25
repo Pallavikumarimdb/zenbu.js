@@ -248,9 +248,13 @@ export function ZenbuProvider({
                   timeOrigin: bt.timeOrigin,
                 }).catch(() => {});
               }
-              // Drain again on next tick to catch FCP / LCP marks that fire
-              // a frame or two after connect.
-              setTimeout(() => {
+              // Keep draining for a few seconds after connect. App-level
+              // readiness marks often happen after <ZenbuProvider> flips to
+              // connected (children mount, Suspense resolves, first frame / FCP
+              // fires). A single 1200ms drain made the flame graph look
+              // "ready" while visible app work was still happening.
+              const started = Date.now();
+              const drainLateMarks = () => {
                 const more = bt.drain();
                 if (more.length > 0 && typeof reporter === "function") {
                   void reporter({
@@ -258,7 +262,11 @@ export function ZenbuProvider({
                     timeOrigin: bt.timeOrigin,
                   }).catch(() => {});
                 }
-              }, 1200);
+                if (Date.now() - started < 8000) {
+                  setTimeout(drainLateMarks, 250);
+                }
+              };
+              setTimeout(drainLateMarks, 250);
             }
           } catch {}
 

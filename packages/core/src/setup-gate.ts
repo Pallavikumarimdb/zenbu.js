@@ -359,7 +359,7 @@ type LoaderData = {
       icons?: Record<string, string>;
     }>;
     appEntrypoint: string;
-    splashPath: string;
+    splashPath?: string;
     installingPath?: string;
   };
   pluginSourceFiles: string[];
@@ -368,7 +368,7 @@ type LoaderData = {
 /**
  * Phase 1 of loader setup: register tsx + read the user's `zenbu.config.ts`.
  * This is split out from the rest of the loader registration so the splash
- * window can be spawned the moment `splashPath` is known, instead of
+ * window can be spawned the moment optional `splashPath` is known, instead of
  * waiting for advice + dynohot to register too. tsx must run with the
  * project's tsconfig because user code (config + plugins) may rely on
  * non-default TS settings (paths, jsx, etc.).
@@ -492,6 +492,24 @@ export async function setupGate(): Promise<void> {
     console.log(`[zenbu] ${label} (${ms()})`);
     bootTrace.mark(label.replace(/\s+/g, "-"));
   };
+
+  // Node 22+ can persist V8 bytecode for loaded modules. This does not
+  // replace tsx/dynohot transforms, but it cuts repeated parse/compile cost
+  // for the large main-process module graph (vite, core services, app
+  // services) on warm boots. Best-effort: older runtimes simply skip it.
+  try {
+    const mod = await import("node:module") as any;
+    const enableCompileCache = mod.enableCompileCache;
+    if (typeof enableCompileCache === "function") {
+      const cacheDir = path.join(os.homedir(), ".zenbu", ".internal", "node-compile-cache");
+      fs.mkdirSync(cacheDir, { recursive: true });
+      const result = enableCompileCache(cacheDir);
+      bootTrace.mark("node-compile-cache-enabled", {
+        status: result?.status,
+        directory: result?.directory ?? cacheDir,
+      });
+    }
+  } catch {}
 
   // Kick off the heavy `import("vite")` IMMEDIATELY — before even waiting
   // for `app.whenReady()`. Vite's main bundle is ~1.4MB and the top-level
@@ -622,20 +640,24 @@ export async function setupGate(): Promise<void> {
   step(`config loaded (${loaderData.payload.plugins.length} plugins)`);
 
   try {
-    // spawnSplashWindow now awaits the splash's did-finish-load (with a
-    // 1500ms cap), so by the time it returns the splash content is
-    // loaded into the renderer process AND the main thread has yielded
-    // long enough for AppKit to composite the window. No artificial
-    // setImmediate / setTimeout yield needed.
-    await bootTrace.span("spawn-splash", () =>
-      spawnSplashWindow(loaderData.payload.splashPath),
-    );
+    if (loaderData.payload.splashPath) {
+      // spawnSplashWindow now awaits the splash's did-finish-load (with a
+      // 1500ms cap), so by the time it returns the splash content is
+      // loaded into the renderer process AND the main thread has yielded
+      // long enough for AppKit to composite the window. No artificial
+      // setImmediate / setTimeout yield needed.
+      await bootTrace.span("spawn-splash", () =>
+        spawnSplashWindow(loaderData.payload.splashPath),
+      );
+    } else {
+      bootTrace.mark("splash-skipped");
+    }
   } catch (err) {
     if (shuttingDown) return;
     throw err;
   }
   if (shuttingDown) return;
-  step("splash shown");
+  step(loaderData.payload.splashPath ? "splash shown" : "splash skipped");
 
   try {
     await bootTrace.span("register-loaders-phase", () =>
@@ -732,6 +754,12 @@ export async function setupGate(): Promise<void> {
   setTimeout(() => {
     bootTrace.flush({ reason: "ready" });
   }, 1500).unref();
+  // Second, later flush for renderer/app-visible marks. The first flush is
+  // intentionally early for quick feedback, but FCP/LCP/AppReady can happen
+  // several seconds later in dev mode if the renderer import graph is large.
+  setTimeout(() => {
+    bootTrace.flush({ reason: "app-visible" });
+  }, 7000).unref();
 
   const autoQuitMs = envMs("ZENBU_AUTO_QUIT_AFTER_IDLE_MS");
   if (autoQuitMs != null) {
