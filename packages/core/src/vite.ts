@@ -1,5 +1,5 @@
 export {
-  advicePreludePlugin,
+  reconcilerBootstrapPlugin,
   resolveAdviceRuntime,
   zenbuAdviceTransform,
   zenbuFrameworkResolve,

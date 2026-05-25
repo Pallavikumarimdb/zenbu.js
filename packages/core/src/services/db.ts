@@ -63,10 +63,20 @@ async function buildCoreSection(): Promise<SectionConfig> {
   let migrations: KyjuMigration[] = [];
   try {
     await fs.access(migrationsDir);
-    migrations = await loadMigrationsFromDir(migrationsDir);
   } catch {
-    // missing dir is allowed — emits an empty section, same as today
+    // Missing dir is allowed: a brand-new core package without
+    // `pnpm db:generate` having run yet. Emit an empty section.
+    return { name: "core", schema: coreSchema, migrations };
   }
+  // Once the dir exists, any load failure (missing file, bad TS, etc.)
+  // is a real bug. Loud-fail rather than swallow — swallowing means
+  // `sectionMigrationPlugin` sees `targetVersion = 0` and silently
+  // leaves the section at its current state, which makes a "my new
+  // field is undefined" symptom impossible to attribute.
+  migrations = await loadMigrationsFromDir(migrationsDir);
+  log.verbose(
+    `core section: loaded ${migrations.length} migration(s) from ${migrationsDir}`,
+  );
   return { name: "core", schema: coreSchema, migrations };
 }
 

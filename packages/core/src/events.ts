@@ -1,7 +1,4 @@
 export type Events = {
-  advice: {
-    reload: { type: string };
-  };
   shortcuts: {
     /**
      * Broadcast whenever the set of registered shortcut definitions or

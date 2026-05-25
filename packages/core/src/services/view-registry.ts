@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import { Service, runtime, getPlugins } from "../runtime";
 import { ReloaderService, type ReloaderEntry } from "./reloader";
 import { DbService } from "./db";
-import { addComponentView } from "./advice-config";
+import { enqueueRegistrationsWrite } from "./advice-config";
 import { createLogger } from "../shared/log";
 
 const log = createLogger("view-registry");
@@ -43,11 +43,11 @@ interface ViewEntry {
   rendering: ViewRendering;
   meta?: ViewMeta;
   /**
-   * Dispose for the per-iframe prelude registration (component views
-   * only). Calling this removes the `registerViewComponent(...)` line
-   * from every iframe's generated prelude and triggers a reload.
+   * For `rendering: "component"` views with a `source`, the
+   * `core.registrations` row's identity — used on unregister to
+   * remove the matching row from the registrations table.
    */
-  disposeSource?: () => void;
+  registrationKey?: { kind: "componentView"; type: string };
 }
 
 /**
@@ -131,7 +131,7 @@ export interface RegisterAliasSpec {
 }
 
 export class ViewRegistryService extends Service.create({
-  key: "view-registry",
+  key: "viewRegistry",
   deps: { reloader: ReloaderService, db: DbService },
 }) {
   private views = new Map<string, ViewEntry>();
@@ -151,20 +151,15 @@ export class ViewRegistryService extends Service.create({
     // them in the registry so chrome (sidebar slot, icon picker,
     // label, focus chain, etc.) treats them identically to iframe views.
     if (rendering === "component") {
-      // If a `source` was provided, route it through the same prelude
-      // pipeline advice / content scripts use. `modulePath` must be
-      // absolute (same convention as `root` for iframe views) — we
-      // don't know which service called `register` without stack
-      // tricks, so we don't try to anchor relative paths here. The
-      // plugin author writes `path.resolve(import.meta.dirname, ...)`.
-      let disposeSource: (() => void) | undefined;
-      if (spec.source) {
-        disposeSource = addComponentView(null, {
-          type,
-          modulePath: spec.source.modulePath,
-          exportName: spec.source.exportName,
-        });
-      }
+      // Two writes for a component view: this service keeps the
+      // metadata (label, icon, sidebar slot, rendering kind) in
+      // `lastKnownViewRegistry`, and the source—if any—goes into
+      // `core.registrations` for the renderer-side reconciler to
+      // dynamic-import and apply. `<View>` reads both.
+      //
+      // `modulePath` must be absolute (same convention as `root` for
+      // iframe views): the plugin author writes
+      // `path.resolve(import.meta.dirname, ...)`.
       const entry: ViewEntry = {
         type,
         url: "",
@@ -173,10 +168,13 @@ export class ViewRegistryService extends Service.create({
         lazy: false,
         rendering,
         meta,
-        disposeSource,
+        registrationKey: spec.source ? { kind: "componentView", type } : undefined,
       };
       this.views.set(type, entry);
       await this.syncToDb();
+      if (spec.source) {
+        await this.writeComponentViewRegistration(type, spec.source);
+      }
       log.verbose(
         `"${type}" registered as component view${spec.source ? ` (source=${spec.source.modulePath})` : ""}`,
       );
@@ -276,9 +274,62 @@ export class ViewRegistryService extends Service.create({
     if (entry.ownsServer) {
       await this.ctx.reloader.remove(type);
     }
-    entry.disposeSource?.();
+    if (entry.registrationKey) {
+      await this.removeComponentViewRegistration(type);
+    }
     this.views.delete(type);
     await this.syncToDb();
+  }
+
+  /**
+   * Write (or update) the `core.registrations` row for a component
+   * view's source. The renderer-side reconciler subscribes to this
+   * table, dynamic-imports the source, and calls
+   * `registerViewComponent(type, exported)` so `<View>` can render
+   * the component inline.
+   *
+   * `rev` is preserved across re-registrations as long as the
+   * `modulePath` is the same — we only bump it when the source path
+   * itself changed (which would force the reconciler to use a new
+   * cache-busted URL). Editing the source's contents bumps `rev` from
+   * the Vite plugin's `handleHotUpdate`.
+   */
+  private async writeComponentViewRegistration(
+    type: string,
+    source: { modulePath: string; exportName?: string },
+  ): Promise<void> {
+    await enqueueRegistrationsWrite((root) => {
+      const idx = root.core.registrations.findIndex(
+        (r: any) => r.kind === "componentView" && r.type === type,
+      );
+      let rev = 0;
+      if (idx >= 0) {
+        const prev = root.core.registrations[idx]!;
+        rev = prev.rev;
+        if (prev.modulePath !== source.modulePath) rev = rev + 1;
+      }
+      const next = {
+        kind: "componentView" as const,
+        type,
+        modulePath: source.modulePath,
+        exportName: source.exportName ?? "default",
+        rev,
+      };
+      if (idx >= 0) {
+        root.core.registrations[idx] = next;
+      } else {
+        root.core.registrations.push(next);
+      }
+    });
+  }
+
+  private async removeComponentViewRegistration(type: string): Promise<void> {
+    await enqueueRegistrationsWrite((root) => {
+      const idx = root.core.registrations.findIndex(
+        (r: any) => r.kind === "componentView" && r.type === type,
+      );
+      if (idx >= 0) root.core.registrations.splice(idx, 1);
+    });
   }
 
 
@@ -298,7 +349,9 @@ export class ViewRegistryService extends Service.create({
           if (entry.ownsServer) {
             await this.ctx.reloader.remove(type);
           }
-          entry.disposeSource?.();
+          if (entry.registrationKey) {
+            await this.removeComponentViewRegistration(type);
+          }
         }
         this.views.clear();
         await this.syncToDb();

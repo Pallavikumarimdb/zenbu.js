@@ -5,6 +5,7 @@ import type {
   BaseWindowService,
   BootTraceService,
   DbService,
+  FunctionRegistryService,
   HttpService,
   ReloaderService,
   RendererHostService,
@@ -38,17 +39,18 @@ type ExtractRpcMethods<T> = {
 
 export type CoreServiceRouter = {
   core: {
-    "base-window": ExtractRpcMethods<BaseWindowService>;
+    baseWindow: ExtractRpcMethods<BaseWindowService>;
     bootTrace: ExtractRpcMethods<BootTraceService>;
     db: ExtractRpcMethods<DbService>;
+    functionRegistry: ExtractRpcMethods<FunctionRegistryService>;
     http: ExtractRpcMethods<HttpService>;
     reloader: ExtractRpcMethods<ReloaderService>;
-    "renderer-host": ExtractRpcMethods<RendererHostService>;
+    rendererHost: ExtractRpcMethods<RendererHostService>;
     rpc: ExtractRpcMethods<RpcService>;
     server: ExtractRpcMethods<ServerService>;
     shortcuts: ExtractRpcMethods<ShortcutsService>;
     updater: ExtractRpcMethods<UpdaterService>;
-    "view-registry": ExtractRpcMethods<ViewRegistryService>;
+    viewRegistry: ExtractRpcMethods<ViewRegistryService>;
     window: ExtractRpcMethods<WindowService>;
   };
 }

@@ -11,7 +11,7 @@ export const MAIN_WINDOW_ID = "main"
 type BootWindow = { windowId: string; win: BaseWindow }
 
 export class BaseWindowService extends Service.create({
-  key: "base-window",
+  key: "baseWindow",
   deps: { db: DbService },
 }) {
   windows = new Map<string, BaseWindow>()

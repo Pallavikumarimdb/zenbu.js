@@ -82,7 +82,7 @@ async function findViteConfigUp(
 }
 
 export class RendererHostService extends Service.create({
-  key: "renderer-host",
+  key: "rendererHost",
   deps: { reloader: ReloaderService, viewRegistry: ViewRegistryService },
 }) {
   url = "";
