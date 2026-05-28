@@ -27,6 +27,10 @@
       "types": "./dist/config.d.mts",
       "import": "./dist/config.mjs"
     },
+    "./install-guard": {
+      "types": "./dist/install-guard.d.mts",
+      "import": "./dist/install-guard.mjs"
+    },
     "./loaders/zenbu": {
       "types": "./dist/loaders/zenbu.d.mts",
       "import": "./dist/loaders/zenbu.mjs"

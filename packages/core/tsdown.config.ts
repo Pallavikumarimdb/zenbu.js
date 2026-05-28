@@ -30,6 +30,7 @@ export default defineConfig([
       "cli/build": "src/cli/build.ts",
       "cli/resolve-config": "src/cli/resolve-config.ts",
       config: "src/config.ts",
+      "install-guard": "src/install-guard.ts",
     },
     format: "esm",
     dts: { eager: true },

@@ -15,11 +15,11 @@
  */
 
 import crypto from "node:crypto"
-import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import fs from "node:fs"
 import fsp from "node:fs/promises"
 import path from "node:path"
+import { spawnWithInstallHangGuard } from "../install-guard"
 
 export type PackageManagerSpec =
   | { type: "pnpm"; version: string }
@@ -196,6 +196,7 @@ export function buildInstallEnv(
  */
 const PNPM_RESOLVED_RE = /Progress:\s+resolved\s+(\d+),\s+reused\s+(\d+),\s+downloaded\s+(\d+)/i
 const PNPM_PROGRESS_RE = /(\d+)\s*\/\s*(\d+)/
+
 export function parseInstallProgress(
   pm: PackageManagerSpec["type"],
   line: string,
@@ -234,68 +235,30 @@ function spawnInstall(args: {
   signal?: AbortSignal
 }): Promise<void> {
   const { bin, cliArgs, cwd, env, label, pmType, reporter, signal } = args
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error(`${label} aborted before start`))
-      return
-    }
-    const usePiped = reporter != null
-    const child = spawn(bin, cliArgs, {
-      cwd,
-      stdio: usePiped ? ["inherit", "pipe", "pipe"] : "inherit",
-      env,
-    })
-    const onAbort = (): void => {
-      try {
-        child.kill("SIGTERM")
-      } catch {}
-    }
-    signal?.addEventListener("abort", onAbort, { once: true })
-
-    if (usePiped) {
-      const wireStream = (
-        stream: NodeJS.ReadableStream | null,
-        which: "stdout" | "stderr",
-      ): void => {
-        if (!stream) return
-        let buf = ""
-        stream.setEncoding("utf8")
-        stream.on("data", (chunk: string) => {
-          buf += chunk
-          let nl: number
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const rawLine = buf.slice(0, nl)
-            buf = buf.slice(nl + 1)
-            reporter?.rawLine?.(which, rawLine)
-            const line = rawLine.replace(/\r/g, "").trimEnd()
-            if (!line) continue
-            reporter?.message?.(line)
-            const progress = parseInstallProgress(pmType, line)
-            if (progress) reporter?.progress?.(progress)
-          }
-        })
-        stream.on("end", () => {
-          if (buf.length > 0) {
-            reporter?.rawLine?.(which, buf)
-            const line = buf.replace(/\r/g, "").trimEnd()
-            if (line) reporter?.message?.(line)
-          }
-        })
-      }
-      wireStream(child.stdout, "stdout")
-      wireStream(child.stderr, "stderr")
-    }
-    child.on("error", (err) => {
-      signal?.removeEventListener("abort", onAbort)
-      reject(err)
-    })
-    child.on("close", (code, sig) => {
-      signal?.removeEventListener("abort", onAbort)
-      if (code === 0) resolve()
-      else if (signal?.aborted) reject(new Error(`${label} aborted (${sig ?? code})`))
-      else reject(new Error(`${label} exited with code ${code}`))
-    })
-  })
+  // Delegate the actual spawn + hang-detection + incident-logging to
+  // the generic `install-guard` helper. Reporter-specific glue stays
+  // here: it translates per-line callbacks into `reporter.message` /
+  // `reporter.progress` events.
+  return spawnWithInstallHangGuard({
+    bin,
+    args: cliArgs,
+    cwd,
+    env,
+    pmType,
+    label,
+    signal,
+    passthroughIfUnobserved: true,
+    onRawLine: reporter
+      ? (rawLine, which) => reporter.rawLine?.(which, rawLine)
+      : undefined,
+    onLine: reporter
+      ? (line) => {
+          reporter.message?.(line)
+          const progress = parseInstallProgress(pmType, line)
+          if (progress) reporter.progress?.(progress)
+        }
+      : undefined,
+  }).then(() => undefined)
 }
 
 export interface RunInstallOptions {
