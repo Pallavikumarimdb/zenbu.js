@@ -421,6 +421,59 @@ function isExistingClone(dir: string): boolean {
   return existsSync(path.join(dir, ".git", "HEAD"));
 }
 
+/**
+ * Repair a partial working tree left behind by an interrupted clone/checkout
+ * (e.g. the cold-boot install hung or was killed mid-clone). The `.git`
+ * directory exists so `isExistingClone` is true and the launcher would
+ * otherwise trust the tree as-is, even though tracked files are missing —
+ * which surfaces downstream as confusing errors like "uiEntrypoint must point
+ * at a directory".
+ *
+ * We only restore tracked files that are ABSENT from disk, and we check them
+ * out at the CURRENT HEAD. This:
+ *   - never changes the commit (preserves the "no auto-update on relaunch"
+ *     guarantee — updates still go through UpdaterService at runtime), and
+ *   - never clobbers files the user has edited (this is a hackable tree);
+ *     only missing files are materialized via `filepaths`.
+ */
+async function repairPartialCheckout(
+  dir: string,
+  installer: Installer | null,
+): Promise<void> {
+  let headSha: string;
+  try {
+    headSha = await git.resolveRef({ fs, dir, ref: "HEAD" });
+  } catch {
+    return;
+  }
+  let tracked: string[];
+  try {
+    tracked = await git.listFiles({ fs, dir, ref: "HEAD" });
+  } catch {
+    return;
+  }
+  const missing = tracked.filter(
+    (rel) => !existsSync(path.join(dir, rel)),
+  );
+  if (missing.length === 0) return;
+  console.log(
+    `[launcher] repairing partial checkout at ${headSha.slice(0, 7)}: ` +
+      `${missing.length}/${tracked.length} tracked files missing`,
+  );
+  _logStream.write(
+    `[launcher] partial checkout repair: restoring ${missing.length} missing files\n`,
+  );
+  installer?.step("clone", `Repairing install (${missing.length} files)`);
+  await git.checkout({
+    fs,
+    dir,
+    ref: headSha,
+    force: true,
+    filepaths: missing,
+  });
+  installer?.done("clone");
+}
+
 async function cloneMirror(
   dir: string,
   mirror: MirrorRef,
@@ -514,7 +567,15 @@ async function ensureAppsDir(
   // Updates after first install go exclusively through
   // `UpdaterService.update()` invoked from user code at runtime — the
   // launcher must never auto-update on quit-and-reopen.
-  if (isExistingClone(appsDir)) return;
+  //
+  // Exception: a clone that was interrupted mid-checkout has `.git` but a
+  // partial working tree. Restore the missing tracked files (at the same
+  // HEAD, without touching user edits) so a hung first install becomes
+  // self-healing on the next launch instead of erroring forever.
+  if (isExistingClone(appsDir)) {
+    await repairPartialCheckout(appsDir, installer);
+    return;
+  }
 
   if (existsSync(appsDir)) {
     const entries = await fsp.readdir(appsDir).catch(() => [] as string[]);
