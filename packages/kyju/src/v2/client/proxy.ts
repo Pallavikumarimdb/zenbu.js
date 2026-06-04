@@ -95,11 +95,60 @@ export const createRecordingProxy = <T extends Record<string, any>>(
   /**
    * Dereference our own proxies to plain JSON so stored values + emitted
    * ops never contain proxies (they don't structured-clone over the wire).
+   *
+   * Recurses into plain arrays/objects: a write like
+   *   node.list = node.list.filter(...)        // elements are proxies
+   *   node.x    = { ...readFromRoot, id: nextId } // nested fields are proxies
+   * hands us a plain container whose *contents* are proxies the caller
+   * read back out of the draft. If we only peeled the top level those
+   * proxies would land in the stored state, and the next read+rewrite
+   * would wrap them in a fresh proxy layer — nesting deeper on every
+   * such write until reads/serialization of that branch stall. We
+   * copy-on-write: branches with no proxy inside are returned as-is
+   * (no allocation, identity preserved for structural sharing).
+   *
+   * `onPath` tracks the current DFS path so a circular reference
+   * can't recurse forever. Kyju state is JSON (acyclic by contract);
+   * a cycle is illegal input that would be rejected at serialization
+   * regardless, so on a back-edge we just stop descending and return
+   * the offending node as-is rather than stack-overflowing here.
    */
-  const peel = (value: any): any => {
+  const peelInner = (value: any, onPath: Set<object>): any => {
     if (value === null || typeof value !== "object") return value;
     const d = proxyToDraft.get(value);
-    return d ? materializeDraft(d) : value;
+    if (d) return materializeDraft(d);
+    if (onPath.has(value)) return value;
+    onPath.add(value);
+    try {
+      if (Array.isArray(value)) {
+        let copy: any[] | null = null;
+        for (let i = 0; i < value.length; i++) {
+          const peeled = peelInner(value[i], onPath);
+          if (peeled !== value[i]) {
+            if (!copy) copy = value.slice();
+            copy[i] = peeled;
+          }
+        }
+        return copy ?? value;
+      }
+      let copy: Record<string, any> | null = null;
+      for (const k of Object.keys(value)) {
+        const peeled = peelInner(value[k], onPath);
+        if (peeled !== value[k]) {
+          if (!copy) copy = { ...value };
+          copy[k] = peeled;
+        }
+      }
+      return copy ?? value;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+
+  const peel = (value: any): any => {
+    // Skip the Set allocation for the common primitive-value write.
+    if (value === null || typeof value !== "object") return value;
+    return peelInner(value, new Set());
   };
 
   const makeDraft = (
