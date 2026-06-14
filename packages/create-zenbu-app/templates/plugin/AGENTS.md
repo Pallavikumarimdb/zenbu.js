@@ -16,7 +16,7 @@ Source: https://zenbulabs.mintlify.app/api-reference/overview
 | `@zenbujs/core/runtime`  | Service base class and runtime.                      |
 | `@zenbujs/core/services` | Built-in core services (Window, DB, RPC, HTTP, etc). |
 | `@zenbujs/core/config`   | `defineConfig`, `definePlugin`, `defineBuildConfig`. |
-| `@zenbujs/core/db`       | Database schema authoring (`createSchema`, `z`).     |
+| `@zenbujs/core/db`       | Database schema authoring (`createSchema`, `collection`).     |
 | `@zenbujs/core/advice`   | Advice types and helpers.                            |
 | `@zenbujs/core/react`    | React hooks for the renderer.                        |
 | `create-zenbu-app`       | CLI scaffolding tool.                                |
@@ -40,7 +40,8 @@ import {
 ## Database
 
 ```typescript theme={null}
-import { createSchema, z } from "@zenbujs/core/db"
+import { createSchema } from "@zenbujs/core/db"
+import { z } from "zod"
 ```
 
 ## React hooks
@@ -859,7 +860,8 @@ This means both the main process and the renderer read and write through the sam
 Each plugin defines a schema using zod that describes the shape of its data.
 
 ```typescript src/main/schema.ts theme={null}
-import { createSchema, z } from "@zenbujs/core/db"
+import { createSchema } from "@zenbujs/core/db"
+import { z } from "zod"
 
 export default createSchema({
   todos: z
@@ -968,7 +970,8 @@ Regular data fields are always held in memory across every process. Collections 
 Define a collection in your schema with `collection(...)`:
 
 ```typescript src/main/schema.ts theme={null}
-import { createSchema, collection, z } from "@zenbujs/core/db"
+import { createSchema, collection } from "@zenbujs/core/db"
+import { z } from "zod"
 
 export default createSchema({
   messages: collection(
@@ -1023,7 +1026,8 @@ Blobs store binary data (`Uint8Array`) like files or images. Like collections, t
 Define a blob in your schema with `blob(...)`:
 
 ```typescript src/main/schema.ts theme={null}
-import { createSchema, blob, z } from "@zenbujs/core/db"
+import { createSchema, blob } from "@zenbujs/core/db"
+import { z } from "zod"
 
 export default createSchema({
   avatar: blob({ debugName: "avatar" }),
