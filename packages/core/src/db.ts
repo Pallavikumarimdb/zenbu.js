@@ -1,4 +1,3 @@
-import { z as _z } from "zod";
 import {
   createSchema,
   collection,
@@ -23,7 +22,6 @@ import type {
 } from "@zenbu/kyju";
 
 export { createSchema, collection, makeCollection, blob, dbStringify, dbParse };
-export const z = _z;
 
 export type Schema<TShape extends _SchemaShape = _SchemaShape> =
   _Schema<TShape>;
