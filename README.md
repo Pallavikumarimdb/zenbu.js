@@ -16,7 +16,7 @@
   <br/>
 
   <span>
-      <a href="https://zenbu.dev" style="text-decoration: none;">Zenbu.js</a> is a JavaScript framework for building hackable software.
+      <a href="https://zenbujs.dev" style="text-decoration: none;">Zenbu.js</a> is a JavaScript framework for building hackable software.
   </span>
 
 </p>
@@ -43,9 +43,12 @@ npx create-zenbu-app
 
 <br />
 
-## Why Zenbu.js
+## Why was Zenbu.js made
+Zenbu.js is the underlying architecture for [Zenbu](https://zenbu.dev), a highly extensible development environment
 
-1. Coding agents can generate and customize software on demand for a specific use case. A hackable app gives them full access to do that.
+## Why make extensible apps
+
+1. Coding agents can generate and customize software on demand for a specific use case
 
 2. Letting people modify your app means more directions get explored than you could reach on your own.
 
@@ -73,9 +76,6 @@ When you write an app in Zenbu your code is **extensible by default**, so plugin
 
 Plugins hot reload just like application code, because application code is itself implemented as a plugin.
 
-## What this is not
-
-Zenbu.js is not a one-size-fits-all model for building extensible applications. It provides a general-purpose way to load external code, with primitives for hot reloading, sharing state, and extending UI. For more complex behavior that isn't covered by Zenbu's architecture, you'll need your own conventions and systems for how that part gets extended, defined inside your Zenbu app.
 
 ## Compatibility
 
