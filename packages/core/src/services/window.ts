@@ -376,8 +376,13 @@ export class WindowService extends Service.create({
       `openWindow:loadURL(${label})`,
       () =>
         new Promise<void>((resolve, reject) => {
-          const onReady = () => {
+          const cleanup = () => {
+            view.webContents.off("dom-ready", onReady);
             view.webContents.off("did-fail-load", onFail);
+            view.webContents.off("destroyed", onDestroyed);
+          };
+          const onReady = () => {
+            cleanup();
             resolve();
           };
           const onFail = (
@@ -388,11 +393,16 @@ export class WindowService extends Service.create({
             isMainFrame: boolean,
           ) => {
             if (!isMainFrame) return;
-            view.webContents.off("dom-ready", onReady);
+            cleanup();
             reject(new Error(`loadURL failed (${errCode}): ${errDesc}`));
+          };
+          const onDestroyed = () => {
+            cleanup();
+            reject(new Error("webContents was destroyed while loading"));
           };
           view.webContents.once("dom-ready", onReady);
           view.webContents.on("did-fail-load", onFail);
+          view.webContents.once("destroyed", onDestroyed);
           // Kick off the navigation; ignore the full-load promise.
           view.webContents.loadURL(url).catch(() => {});
         }),
